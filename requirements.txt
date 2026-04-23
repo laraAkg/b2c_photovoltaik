@@ -6,3 +6,6 @@ psycopg2-binary
 shapely
 matplotlib
 jupyter
+streamlit
+altair
+pydeck
