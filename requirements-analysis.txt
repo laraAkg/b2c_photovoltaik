@@ -1,0 +1,6 @@
+# Optional packages for notebooks, geodata preparation and offline exploration.
+# The Streamlit app itself only needs requirements.txt.
+geopandas
+shapely
+matplotlib
+jupyter

@@ -1,11 +1,7 @@
 python-dotenv
 pandas
-geopandas
 sqlalchemy
 psycopg2-binary
-shapely
-matplotlib
-jupyter
 streamlit
 altair
 pydeck

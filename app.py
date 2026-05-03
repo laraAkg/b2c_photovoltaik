@@ -5,7 +5,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from app_utils import (
+from src.geomarketing_app.data import (
     STRATEGY_WEIGHTS,
     compute_quartier_scores,
     enrich_with_dynamic_quartier_context,
@@ -17,21 +17,72 @@ from app_utils import (
     normalize_weights,
 )
 
+STRATEGY_HELP = {
+    "Balanced": "Ausgewogene Priorisierung fuer eine allgemeine Kampagne.",
+    "Technical": "Fokus auf PV-Ertrag und Anzahl geeigneter Daecher.",
+    "Premium": "Fokus auf kaufkraftstarke Quartiere mit solider PV-Basis.",
+    "Ownership-focused": "Fokus auf Quartiere mit hoeherer Eigentumsquote.",
+    "Custom": "Eigene Gewichtung fuer Szenarien oder Praesentationsvarianten.",
+}
+
 st.set_page_config(
-    page_title="Geomarketing-Tool PV Zürich",
+    page_title="PV Geomarketing Zürich",
     page_icon="☀️",
     layout="wide",
 )
 
-# Schlankes Styling für eine aufgeräumte Dashboard-Optik.
+# Dashboard styling for a calm, work-focused Streamlit UI.
 st.markdown(
     """
     <style>
-      .main {padding-top: 0.8rem;}
-      .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
-      .subtitle {color: #4a5568; font-size: 1.05rem; margin-top: -0.45rem; margin-bottom: 0.8rem;}
-      .hint-box {background:#f6f8fb; border:1px solid #e2e8f0; padding:0.75rem 0.9rem; border-radius:0.6rem;}
-      .section-title {margin-top: 0.4rem; margin-bottom: 0.1rem; font-weight: 600;}
+      .main {padding-top: 0.7rem;}
+      .block-container {padding-top: 1rem; padding-bottom: 2rem; max-width: 1320px;}
+      h1, h2, h3 {letter-spacing: 0;}
+      .app-eyebrow {
+        color: #596579;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 0.2rem;
+      }
+      .subtitle {
+        color: #435064;
+        font-size: 1.04rem;
+        line-height: 1.5;
+        margin-top: -0.35rem;
+        margin-bottom: 1rem;
+        max-width: 820px;
+      }
+      .hint-box {
+        background: #f7faf9;
+        border: 1px solid #d9e4df;
+        border-left: 4px solid #2f855a;
+        padding: 0.78rem 0.95rem;
+        border-radius: 0.45rem;
+        color: #304152;
+      }
+      .section-title {
+        margin-top: 0.65rem;
+        margin-bottom: 0.15rem;
+        font-weight: 700;
+        color: #1f2937;
+      }
+      div[data-testid="metric-container"] {
+        background: #ffffff;
+        border: 1px solid #dfe7ef;
+        border-radius: 0.45rem;
+        padding: 0.72rem 0.82rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      }
+      div[data-testid="stDownloadButton"] button,
+      div[data-testid="stButton"] button {
+        border-radius: 0.38rem;
+        border: 1px solid #b8c5d6;
+      }
+      section[data-testid="stSidebar"] {
+        border-right: 1px solid #e1e7ef;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -71,6 +122,42 @@ def fmt_num(value, decimals: int = 0) -> str:
 
 def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
+
+
+def table_height(row_count: int, max_height: int = 460) -> int:
+    return min(max_height, 38 * max(row_count, 1) + 48)
+
+
+def render_overview(quartier_scored: pd.DataFrame, strassen_df: pd.DataFrame, adressen_df: pd.DataFrame):
+    best = quartier_scored.iloc[0]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Top-Quartier", best["qname"])
+    c2.metric("Quartiere", fmt_num(len(quartier_scored)))
+    c3.metric("Strassen", fmt_num(strassen_df["lokalisationsname"].nunique()))
+    c4.metric("Adressen", fmt_num(len(adressen_df)))
+
+    c5, c6, c7 = st.columns(3)
+    c5.metric("PV-Ertrag gesamt", f"{fmt_num(quartier_scored['sum_stromertrag'].sum())} kWh")
+    c6.metric("Gute Dächer gesamt", fmt_num(quartier_scored["anzahl_gute_daecher"].sum()))
+    c7.metric("Höchster Score", fmt_num(best["targeting_score_dyn"], 3))
+
+
+def render_db_error(exc: Exception, db_url: str):
+    st.error("Die App konnte keine Verbindung zur PostgreSQL/PostGIS-Datenbank herstellen.")
+    st.markdown(
+        """
+        Prüfe kurz diese Punkte:
+
+        1. PostgreSQL läuft lokal.
+        2. Die Datenbank `geomarketing` existiert.
+        3. PostGIS ist installiert und in der Datenbank aktiviert.
+        4. `GEOMARKETING_DB_URL` in `.env` passt zu Port, Benutzer und Datenbank.
+        """
+    )
+    st.code(f"GEOMARKETING_DB_URL={db_url}", language="text")
+    with st.expander("Technische Fehlermeldung anzeigen"):
+        st.exception(exc)
 
 
 def build_quartier_map(df: pd.DataFrame):
@@ -130,9 +217,12 @@ def build_quartier_map(df: pd.DataFrame):
 def show_quartier_view(quartier_scored: pd.DataFrame, top_n: int):
     st.markdown("### Quartier-Analyse")
 
+    top_quartiers = quartier_scored.head(top_n)
+    quartier_options = quartier_scored["qname"].sort_values().tolist()
     selected_q = st.selectbox(
         "Quartier auswählen",
-        options=quartier_scored["qname"].sort_values().tolist(),
+        options=quartier_options,
+        index=quartier_options.index(top_quartiers.iloc[0]["qname"]),
         key="quartier_select",
     )
 
@@ -148,8 +238,15 @@ def show_quartier_view(quartier_scored: pd.DataFrame, top_n: int):
     c5.metric("Gute Dächer", fmt_num(row["anzahl_gute_daecher"]))
     c6.metric("Summe Stromertrag", f"{fmt_num(row['sum_stromertrag'])} kWh")
 
+    st.markdown(
+        f"<div class='hint-box'><b>{row['qname']}</b> liegt aktuell auf Rang "
+        f"<b>{fmt_num(row['rank_dyn'])}</b>. Der dynamische Score reagiert direkt auf die Gewichtung "
+        "in der Sidebar.</div>",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("<p class='section-title'>Top-Quartiere nach dynamischem Score</p>", unsafe_allow_html=True)
-    top_df = quartier_scored.head(top_n).copy()
+    top_df = top_quartiers.copy()
     table_df = top_df[
         [
             "rank_dyn",
@@ -174,7 +271,18 @@ def show_quartier_view(quartier_scored: pd.DataFrame, top_n: int):
         }
     )
 
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        table_df,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height(len(table_df)),
+        column_config={
+            "Score": st.column_config.NumberColumn(format="%.3f"),
+            "Stromertrag (kWh)": st.column_config.NumberColumn(format="%d"),
+            "Median Income (CHF)": st.column_config.NumberColumn(format="%d"),
+            "Eigentumsquote (%)": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
 
     st.download_button(
         "Top-Quartiere als CSV herunterladen",
@@ -215,6 +323,15 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         unsafe_allow_html=True,
     )
 
+    sort_options = {
+        "Stromertrag": "sum_stromertrag",
+        "Gute Dachflächen": "anzahl_gute_dachflaechen",
+        "Anzahl Adressen": "anzahl_adressen",
+        "Quartier-Score": "avg_quartier_score_dyn",
+    }
+    sort_label = st.selectbox("Top-Straßen sortieren nach", options=list(sort_options), index=0)
+    sort_col = sort_options[sort_label]
+
     selected_s = st.selectbox(
         "Straße auswählen",
         options=strassen_df["lokalisationsname"].dropna().sort_values().tolist(),
@@ -238,8 +355,8 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         fmt_num(row.get("best_quartier_rank_dyn")) if pd.notna(row.get("best_quartier_rank_dyn")) else "-",
     )
 
-    st.markdown("<p class='section-title'>Top-Straßen nach Stromertrag</p>", unsafe_allow_html=True)
-    top_df = strassen_df.sort_values("sum_stromertrag", ascending=False).head(top_n).copy()
+    st.markdown(f"<p class='section-title'>Top-Straßen nach {sort_label}</p>", unsafe_allow_html=True)
+    top_df = strassen_df.sort_values(sort_col, ascending=False).head(top_n).copy()
     table_df = top_df[
         [
             "lokalisationsname",
@@ -262,7 +379,17 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         }
     )
 
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        table_df,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height(len(table_df)),
+        column_config={
+            "Stromertrag (kWh)": st.column_config.NumberColumn(format="%d"),
+            "Ø Quartier-Score (dyn)": st.column_config.NumberColumn(format="%.3f"),
+            "Bester Quartier-Rank (dyn)": st.column_config.NumberColumn(format="%d"),
+        },
+    )
     st.download_button(
         "Top-Straßen als CSV herunterladen",
         data=to_csv_bytes(table_df),
@@ -274,11 +401,13 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         alt.Chart(top_df)
         .mark_bar(cornerRadiusTopRight=5, cornerRadiusBottomRight=5)
         .encode(
-            x=alt.X("sum_stromertrag:Q", title="Stromertrag (kWh)"),
+            x=alt.X(f"{sort_col}:Q", title=sort_label),
             y=alt.Y("lokalisationsname:N", sort="-x", title="Straße"),
             tooltip=[
                 alt.Tooltip("lokalisationsname:N", title="Straße"),
                 alt.Tooltip("sum_stromertrag:Q", title="Stromertrag", format=",.0f"),
+                alt.Tooltip("anzahl_gute_dachflaechen:Q", title="Gute Dachflächen", format=",.0f"),
+                alt.Tooltip("avg_quartier_score_dyn:Q", title="Ø Quartier-Score", format=".3f"),
             ],
             color=alt.value("#2f855a"),
         )
@@ -295,7 +424,26 @@ def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
         unsafe_allow_html=True,
     )
 
-    options_df = adressen_df.copy()
+    f1, f2 = st.columns(2)
+    quartiers = ["Alle"] + adressen_df["statistisches_quartier"].dropna().sort_values().unique().tolist()
+    selected_quartier = f1.selectbox("Quartier filtern", options=quartiers, index=0)
+
+    filtered_df = adressen_df.copy()
+    if selected_quartier != "Alle":
+        filtered_df = filtered_df[filtered_df["statistisches_quartier"] == selected_quartier]
+
+    streets = ["Alle"] + filtered_df["lokalisationsname"].dropna().sort_values().unique().tolist()
+    selected_street = f2.selectbox("Straße filtern", options=streets, index=0)
+    if selected_street != "Alle":
+        filtered_df = filtered_df[filtered_df["lokalisationsname"] == selected_street]
+
+    if filtered_df.empty:
+        st.warning("Keine Adressen für diese Filterkombination gefunden.")
+        return
+
+    st.caption(f"{fmt_num(len(filtered_df))} passende Adressen")
+
+    options_df = filtered_df.copy()
     options_df["adresse_label"] = (
         options_df["adresse"].fillna("Unbekannt")
         + " | EGID "
@@ -328,7 +476,7 @@ def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
     )
 
     st.markdown("<p class='section-title'>Top-Adressen nach Stromertrag</p>", unsafe_allow_html=True)
-    top_df = adressen_df.sort_values("sum_stromertrag", ascending=False).head(top_n).copy()
+    top_df = filtered_df.sort_values("sum_stromertrag", ascending=False).head(top_n).copy()
     table_df = top_df[
         [
             "adresse",
@@ -353,7 +501,17 @@ def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
         }
     )
 
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        table_df,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height(len(table_df)),
+        column_config={
+            "Stromertrag (kWh)": st.column_config.NumberColumn(format="%d"),
+            "Quartier-Score (dyn)": st.column_config.NumberColumn(format="%.3f"),
+            "Quartier-Rank (dyn)": st.column_config.NumberColumn(format="%d"),
+        },
+    )
     st.download_button(
         "Top-Adressen als CSV herunterladen",
         data=to_csv_bytes(table_df),
@@ -387,18 +545,16 @@ def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
 
 
 def main():
+    st.markdown("<div class='app-eyebrow'>B2C Photovoltaik</div>", unsafe_allow_html=True)
     st.title("Geomarketing-Tool für Photovoltaik in Zürich")
     st.markdown(
-        "<p class='subtitle'>Priorisierung profitabler Vertriebsgebiete auf Quartier-, Straßen- und Adressebene</p>",
+        "<p class='subtitle'>Priorisierung profitabler Vertriebsgebiete auf Quartier-, Straßen- und Adressebene. "
+        "Der Score verbindet technisches PV-Potenzial mit demografischer Attraktivität.</p>",
         unsafe_allow_html=True,
-    )
-    st.write(
-        "Diese App kombiniert technische PV-Eignung (Dachflächen und Stromertrag) "
-        "mit demografischen Faktoren, um Vertriebsgebiete datenbasiert zu priorisieren."
     )
 
     with st.sidebar:
-        st.header("Steuerung")
+        st.header("Analyse")
         mode = st.radio("Ebene", options=["Quartier", "Straße", "Adresse"], horizontal=False)
 
         strategy = st.selectbox(
@@ -406,6 +562,7 @@ def main():
             options=["Balanced", "Technical", "Premium", "Ownership-focused", "Custom"],
             index=0,
         )
+        st.caption(STRATEGY_HELP[strategy])
 
         if strategy == "Custom":
             st.caption("Eigene Gewichtung (automatisch normiert)")
@@ -440,7 +597,10 @@ def main():
         if strategy == "Custom" and raw_sum != 100:
             st.info(f"Hinweis: Die Eingabe summiert sich zu {raw_sum:.0f}. Werte wurden automatisch normiert.")
 
-        top_n = st.select_slider("Top-N", options=[5, 10, 20], value=10)
+        top_n = st.select_slider("Top-N", options=[5, 10, 20, 50], value=10)
+        st.divider()
+        st.caption("Datenquelle")
+        st.code(get_db_url(), language="text")
 
     db_url = get_db_url()
     with st.spinner("Lade Daten aus der Geomarketing-Datenbank..."):
@@ -449,14 +609,16 @@ def main():
             strassen_df = fetch_strassen_data(db_url)
             adressen_df = fetch_adressen_data(db_url)
         except Exception as exc:
-            st.error("Fehler beim Laden aus PostgreSQL/PostGIS. Bitte Verbindung prüfen.")
-            st.exception(exc)
+            render_db_error(exc, db_url)
             st.stop()
 
     quartier_scored = compute_quartier_scores(quartier_df, weights)
     strassen_ctx, adressen_ctx = enrich_with_dynamic_quartier_context(
         strassen_df, adressen_df, quartier_scored
     )
+
+    render_overview(quartier_scored, strassen_ctx, adressen_ctx)
+    st.divider()
 
     if mode == "Quartier":
         show_quartier_view(quartier_scored, top_n)

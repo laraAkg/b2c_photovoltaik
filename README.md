@@ -1,255 +1,159 @@
-# B2C-Marketing fuer Photovoltaik: Die Jagd nach den besten Daechern
+# B2C Photovoltaik Geomarketing
 
-Praxisnaher Hochschulprototyp fuer das Modul "Einsatz von Geodaten im Marketing". Das Projekt verbindet technische Dach-Eignung aus dem Sonnendach-Datensatz mit demografischer Attraktivitaet auf Quartierebene in Zuerich. Ziel ist eine vertriebsnahe Priorisierung von Marketinggebieten fuer den Direktvertrieb von Photovoltaikanlagen.
+Streamlit-Prototyp fuer ein Geomarketing-Projekt in Zuerich. Die App kombiniert technisches PV-Potenzial mit Quartierdaten und hilft, Quartiere, Strassen und einzelne Adressen fuer Photovoltaik-Marketing zu priorisieren.
 
-## Projektidee
+## Was die App zeigt
 
-`sonnendach.ch` zeigt, welche Daechern technisch fuer Solarenergie geeignet sind. Fuer den Vertrieb reicht diese Information aber nicht aus: Ein technisch gutes Dach ist nicht automatisch ein wirtschaftlich attraktiver Lead. Dieses Projekt erweitert das reine Dachpotenzial um demografische Zielgruppenlogik und erzeugt daraus einen nachvollziehbaren Geomarketing-Score.
-
-## Ziel
-
-Identifikation von Quartieren in Zuerich, die sich besonders gut fuer eine gezielte Vermarktung von Photovoltaikanlagen eignen. Die Analyse soll Fachlichkeit, Datenbank-Workflow, Python-Scoring und QGIS-Visualisierung klar voneinander trennen.
-
-## Forschungsfrage
-
-Welche Quartiere in Zuerich eignen sich am besten fuer die gezielte Vermarktung von Photovoltaikanlagen, wenn man Solarpotenzial und demografische Merkmale gemeinsam betrachtet?
-
-## Methodischer Rahmen
-
-Das Projekt orientiert sich an einem klassischen Geomarketing-Workflow:
-
-1. Oeffentliche Geodaten als Rohsignal laden
-2. Technische Eignung in PostGIS vorqualifizieren
-3. Dachpotenzial raeumlich auf Quartiere aggregieren
-4. Quartiere mit demografischen Merkmalen anreichern
-5. In Python einen transparenten Targeting-Score berechnen
-6. Ergebnisse als vertriebstaugliche Entscheidungshilfe in QGIS visualisieren
-
-## Pilotgebiet
-
-Stadt Zuerich, Ziel-CRS `EPSG:2056` / LV95
-
-## Datenquellen
-
-### Pflichtdaten
-
-- Bundesamt fuer Energie (BFE), Datensatz "Eignung von Hausdaechern fuer die Nutzung von Sonnenenergie" als GeoPackage
-  - erwartete inhaltliche Felder: Eignungsklasse, Dachflaeche, Stromertrag, Strahlung, Geometrie
-  - Fokus: sehr gute und hervorragende Daechern
-- Statistische Quartiere der Stadt Zuerich
-- Demografische Daten pro Quartier, mindestens:
-  - Einkommen
-  - optional: Eigentumsquote, Anteil Einfamilienhaeuser, Wohnungsstruktur
-
-### Optionale Daten
-
-- OpenStreetMap Strassen fuer eine Strassenzug-Logik
-- swisstopo Basemap oder Gebaeudereferenz fuer die finale Kartenkomposition in QGIS
-
-## Technologien
-
-- PostgreSQL 14+
-- PostGIS 3+
-- Python 3.10+
-- pandas
-- GeoPandas
-- SQLAlchemy
-- psycopg2-binary
-- shapely
-- Jupyter oder Python-Skript
-- QGIS 3.x
+- dynamische Quartier-Rankings nach PV-Ertrag, guten Daechern, Einkommen und Eigentumsquote
+- Top-Strassen fuer lokale Kampagnen und Aussendienstplanung
+- priorisierte Adressen als operative Lead-Ebene
+- interaktive Karte der Quartier-Scores
+- CSV-Downloads fuer die wichtigsten Tabellen
 
 ## Projektstruktur
 
 ```text
-pv_b2c_photovoltaik_zuerich/
-├── .env.example
-├── README.md
-├── requirements.txt
-├── data_raw/
-│   └── Ablage fuer originale Quelldaten (nicht versioniert)
-├── data_processed/
-│   └── Exportierte Zwischenstaende, CSV, GeoPackage
-├── docs/
-│   ├── methodology.md
-│   └── pitch_notes.md
-├── exports/
-│   └── Finale Tabellenexporte fuer Abgabe oder Praesentation
-├── notebooks/
-│   └── Optionaler Platz fuer ein Notebook-Ableger des Python-Skripts
-├── qgis/
-│   └── README.md
-├── sql/
-│   ├── 01_create_schema.sql
-│   ├── 02_prepare_roofs.sql
-│   ├── 03_prepare_quartiers.sql
-│   ├── 04_aggregate_to_quartiers.sql
-│   └── 05_export_views.sql
-└── src/
-    └── targeting_analysis.py
+b2c_photovoltaik/
+├── app.py                  # Streamlit-Frontend
+├── requirements.txt        # Python-Abhaengigkeiten
+├── requirements-analysis.txt
+├── .env.example            # Beispiel fuer lokale DB-Konfiguration
+├── src/
+│   └── geomarketing_app/
+│       └── data.py         # Datenbankabfragen, Scoring und Datenaufbereitung
+├── scripts/
+│   ├── import_geomarketing_dump.ps1
+│   ├── recompute_targeting_score.py
+│   └── start_app_windows.ps1
+└── docs/
+    └── qgis.md             # Hinweise fuer QGIS-Visualisierung
 ```
 
-### Zweck der wichtigsten Dateien
+Nicht ins Git gehoeren lokale Datenbank-Dumps, Rohdaten, virtuelle Umgebungen und `.env`-Dateien. Das ist in `.gitignore` abgedeckt.
 
-- `sql/01_create_schema.sql`: Datenbankstruktur, Schemas, Extensions, Zieltabellen und Importhinweise
-- `sql/02_prepare_roofs.sql`: Dachdaten pruefen, auf LV95 transformieren, fachlich filtern und bereinigen
-- `sql/03_prepare_quartiers.sql`: Quartiere und Demografie vereinheitlichen und fuer den Join vorbereiten
-- `sql/04_aggregate_to_quartiers.sql`: Dach-KPIs je Quartier berechnen
-- `sql/05_export_views.sql`: Endgueltige Export-Views fuer Python und QGIS
-- `src/targeting_analysis.py`: Python-Analyse, Explorationsschritte, Scoring, Rueckschreiben nach PostGIS
-- `docs/methodology.md`: Methodik, Annahmen, Gewichtungen, Datenlogik
-- `docs/pitch_notes.md`: Praesentationsnotizen fuer einen 10-Minuten-Pitch
-- `qgis/README.md`: Layer- und Visualisierungsempfehlungen fuer die Kartenerstellung
-- `.env.example`: Verbindungsparameter und fachliche Schwellenwerte
+## Voraussetzungen
 
-## Installationsanleitung
+- Python 3.10 oder neuer
+- PostgreSQL mit PostGIS
+- ein importierter Datenbank-Dump mit den erwarteten `mart`-Views
 
-### 1. Python-Umgebung
+Die App erwartet standardmaessig diese Tabellen/Views:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+- `mart.quartier_targeting_results_map`
+- `mart.strassen_mit_pv`
+- `mart.adressen_mit_pv`
+
+## Installation auf Windows
+
+```powershell
+git clone https://github.com/YanickMoos/b2c_photovoltaik.git
+cd b2c_photovoltaik
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. PostgreSQL / PostGIS
+Falls PowerShell die Aktivierung blockiert:
 
-Eine lokale Datenbank anlegen, zum Beispiel:
-
-```bash
-createdb pv_marketing_zh
-psql -d pv_marketing_zh -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-### 3. Umgebungsvariablen
+Danach ein neues Terminal oeffnen und die Aktivierung erneut ausfuehren.
 
-`.env.example` nach `.env` kopieren und anpassen:
+Optionale Analyse- und Notebook-Pakete sind getrennt, damit die Webapp unter Windows schneller und stabiler installiert:
 
-```bash
-cp .env.example .env
+```powershell
+pip install -r requirements-analysis.txt
 ```
 
-## Import-Workflow
+## Datenbank einrichten
 
-### GeoPackage nach PostGIS importieren
+Wenn PostgreSQL auf dem Standardport `5432` laeuft:
 
-Beispiel fuer die Sonnendach-Daten:
-
-```bash
-ogr2ogr \
-  -f PostgreSQL PG:"host=localhost dbname=pv_marketing_zh user=postgres password=postgres" \
-  data_raw/sonnendach_zh.gpkg \
-  -nln raw.bfe_roofs_raw \
-  -lco GEOMETRY_NAME=geom \
-  -lco FID=gid \
-  -nlt PROMOTE_TO_MULTI
+```powershell
+createdb -p 5432 geomarketing
+psql -p 5432 -d geomarketing -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+pg_restore -p 5432 -d geomarketing .\geomarketing.dump
 ```
 
-Beispiel fuer Quartiere:
+Wenn PostgreSQL auf Port `5433` laeuft, zum Beispiel bei Postgres.app auf Mac:
 
-```bash
-ogr2ogr \
-  -f PostgreSQL PG:"host=localhost dbname=pv_marketing_zh user=postgres password=postgres" \
-  data_raw/statistische_quartiere_zh.gpkg \
-  -nln raw.zurich_quartiers_raw \
-  -lco GEOMETRY_NAME=geom \
-  -lco FID=gid \
-  -nlt PROMOTE_TO_MULTI
+```powershell
+createdb -p 5433 geomarketing
+psql -p 5433 -d geomarketing -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+pg_restore -p 5433 -d geomarketing .\geomarketing.dump
 ```
 
-### CSV nach PostgreSQL importieren
+## Datenbankverbindung konfigurieren
 
-```bash
-psql -d pv_marketing_zh -c "\copy raw.demography_quartier_raw FROM 'data_raw/zurich_demography.csv' WITH (FORMAT csv, HEADER true, DELIMITER ',')"
+Optional `.env.example` nach `.env` kopieren und anpassen:
+
+```powershell
+copy .env.example .env
 ```
 
-### Optional: OSM-Strassen importieren
+Die wichtigste Variable ist:
 
-Variante mit `ogr2ogr` auf vorbereiteten Geofabrik-Daten:
-
-```bash
-ogr2ogr \
-  -f PostgreSQL PG:"host=localhost dbname=pv_marketing_zh user=postgres password=postgres" \
-  data_raw/zurich_streets.gpkg \
-  -nln raw.osm_streets_raw \
-  -lco GEOMETRY_NAME=geom \
-  -nlt MULTILINESTRING
+```text
+GEOMARKETING_DB_URL=postgresql+psycopg2://postgres@localhost:5432/geomarketing
 ```
 
-## Reihenfolge der Ausfuehrung
+Wenn keine Variable gesetzt ist, nutzt die App einen lokalen Standardwert.
 
-1. Rohdaten in `data_raw/` ablegen
-2. `.env` erstellen und pruefen
-3. SQL-Skripte in dieser Reihenfolge ausfuehren:
-   - `sql/01_create_schema.sql`
-   - Datenimport per `ogr2ogr` und `\copy`
-   - `sql/02_prepare_roofs.sql`
-   - `sql/03_prepare_quartiers.sql`
-   - `sql/04_aggregate_to_quartiers.sql`
-   - `sql/05_export_views.sql`
-4. Python-Analyse starten:
+## App starten
 
-```bash
-python src/targeting_analysis.py
+```powershell
+streamlit run app.py
 ```
 
-5. Ergebnislayer in QGIS laden:
-   - `mart.quartier_targeting_results`
-   - `mart.top_roofs_for_campaign`
-   - optional `mart.street_segments_priority`
+Danach oeffnet Streamlit die App im Browser, normalerweise unter:
 
-## Erwartete Outputs
+```text
+http://localhost:8501
+```
 
-### In PostGIS
+## Typische Probleme
 
-- `core.roofs_top_candidates`
-- `core.quartiers_enriched`
-- `mart.quartier_roof_metrics`
-- `mart.quartier_targeting_results`
-- `mart.top_roofs_for_campaign`
-- optional `mart.street_segments_priority`
+### Schneller Start unter Windows
 
-### In `exports/`
+Alternativ kann das Hilfsskript Setup und Start uebernehmen:
 
-- `quartier_targeting_results.gpkg`
-- `quartier_targeting_results.csv`
-- `top_roofs_for_campaign.gpkg`
+```powershell
+.\scripts\start_app_windows.ps1
+```
 
-## QGIS-Hinweise
+### Dump importieren
 
-- Quartiere als Choroplethenkarte auf Basis von `marketing_targeting_score`
-- 3 Klassen fuer `score_class`: niedrig, mittel, hoch
-- Top-5-Quartiere mit Labels fuer Quartiername und Score
-- Top-Daecher als Punkt- oder Polygonoverlay in neutralem Gelb/Orange
-- Basemap zurueckhaltend halten, damit die Priorisierungslogik im Vordergrund bleibt
+Wenn `geomarketing.dump` z. B. im Downloads-Ordner liegt:
 
-Details stehen in `qgis/README.md`.
+```powershell
+.\scripts\import_geomarketing_dump.ps1 -DumpPath "$env:USERPROFILE\Downloads\geomarketing.dump" -Port 5432
+```
 
-## Pitch-relevante Kernaussagen
+### `CREATE EXTENSION postgis` funktioniert nicht
 
-- Nicht jedes sonnige Dach ist ein guter Vertriebslead.
-- Die Kombination aus Dachpotenzial und Demografie liefert eine vertriebsnaehere Priorisierung.
-- Das Ergebnis ist keine Prognose fuer Abschluesse, sondern eine datenbasierte Entscheidungshilfe fuer Gebietsselektion.
-- Quartiere mit vielen ertragsstarken Daechern und hoher Kaufkraft sind die erste Prioritaet fuer Direktmarketing.
+PostGIS ist noch nicht installiert. Unter Windows kann es ueber den PostgreSQL Stack Builder nachinstalliert werden:
 
-## Wichtige Annahmen
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\stackbuilder.exe"
+```
 
-- Die exakten Feldnamen des BFE-Datensatzes und der demografischen Dateien koennen lokal abweichen.
-- Alle SQL- und Python-Schritte verwenden deshalb sprechende Platzhalter und klar kommentierte Mapping-Stellen.
-- Vor dem ersten produktiven Lauf muessen Spaltennamen fuer:
-  - Eignungsklasse
-  - Dachflaeche
-  - Stromertrag
-  - Quartier-ID
-  - Einkommen
-  - optionale Eigentums- oder Wohnstrukturmerkmale
-  an die realen Quelldaten angepasst werden.
+### Verbindung zur Datenbank schlaegt fehl
 
-## Realistische Projektgrenzen
+Pruefe Port, Benutzername und Datenbankname:
 
-- Kein Machine Learning
-- Keine Web-App
-- Keine Cloud-Architektur
-- Kein Anspruch auf exakte Absatzprognose
+```powershell
+psql -p 5432 -d geomarketing
+```
 
-Der Prototyp ist bewusst als nachvollziehbares Hochschulprojekt konzipiert: fachlich plausibel, technisch sauber und in einer studentischen Gruppenarbeit realistisch umsetzbar.
+Falls deine lokale Installation einen anderen Port verwendet, passe `GEOMARKETING_DB_URL` entsprechend an.
+
+### Dump-Datei ist gross
+
+`geomarketing.dump` nicht ins Git pushen. Besser ueber Google Drive, OneDrive, Dropbox oder WeTransfer teilen.
+
+## Fachliche Idee
+
+Nicht jedes sonnige Dach ist automatisch ein guter Vertriebslead. Der Prototyp verbindet technische Solarpotenziale mit demografischer Attraktivitaet und macht daraus eine nachvollziehbare Priorisierung fuer B2C-Marketing.
