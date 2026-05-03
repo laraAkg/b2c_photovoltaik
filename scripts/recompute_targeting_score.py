@@ -1,10 +1,12 @@
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from src.geomarketing_app.data import get_db_url
+
 # --------------------------------------------------
 # 1) Datenbankverbindung
 # --------------------------------------------------
-engine = create_engine("postgresql+psycopg2://lara@localhost:5433/geomarketing")
+engine = create_engine(get_db_url(), pool_pre_ping=True)
 
 # --------------------------------------------------
 # 2) User-Gewichte einlesen

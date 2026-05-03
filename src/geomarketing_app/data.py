@@ -3,9 +3,12 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-DEFAULT_DB_URL = "postgresql+psycopg2://lara@localhost:5433/geomarketing"
+load_dotenv()
+
+DEFAULT_DB_URL = "postgresql+psycopg2://postgres@localhost:5432/geomarketing"
 
 STRATEGY_WEIGHTS = {
     "Balanced": {
