@@ -63,6 +63,12 @@ def load_quartier_data(engine) -> pd.DataFrame:
             sum_stromertrag::float AS sum_stromertrag,
             avg_stromertrag::float AS avg_stromertrag,
             CASE
+                WHEN geom IS NOT NULL THEN ST_X(ST_Transform(ST_PointOnSurface(geom), 4326))
+            END AS center_lon,
+            CASE
+                WHEN geom IS NOT NULL THEN ST_Y(ST_Transform(ST_PointOnSurface(geom), 4326))
+            END AS center_lat,
+            CASE
                 WHEN geom IS NOT NULL THEN ST_AsGeoJSON(ST_CurveToLine(geom))
             END AS geojson
         FROM mart.quartier_targeting_results_map
@@ -96,21 +102,33 @@ def load_adressen_data(engine) -> pd.DataFrame:
     """Lädt die operative Adress-/Haus-Ebene."""
     query = text(
         """
+        WITH roof_points AS (
+            SELECT
+                "GWR_EGID"::bigint AS gwr_egid,
+                ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326)) AS roof_lon,
+                ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326)) AS roof_lat
+            FROM core.sonnendach_good
+            WHERE "GWR_EGID" IS NOT NULL
+            GROUP BY "GWR_EGID"
+        )
         SELECT
-            adresse,
-            lokalisationsname,
-            hausnummer,
-            gwr_egid,
-            stadtkreis,
-            statistisches_quartier,
-            anzahl_gute_dachflaechen::float AS anzahl_gute_dachflaechen,
-            sum_dachflaeche::float AS sum_dachflaeche,
-            sum_stromertrag::float AS sum_stromertrag,
-            beste_klasse,
-            targeting_score::float AS targeting_score,
-            rank::float AS rank
-        FROM mart.adressen_mit_pv
-        ORDER BY adresse;
+            a.adresse,
+            a.lokalisationsname,
+            a.hausnummer,
+            a.gwr_egid,
+            a.stadtkreis,
+            a.statistisches_quartier,
+            a.anzahl_gute_dachflaechen::float AS anzahl_gute_dachflaechen,
+            a.sum_dachflaeche::float AS sum_dachflaeche,
+            a.sum_stromertrag::float AS sum_stromertrag,
+            a.beste_klasse,
+            a.targeting_score::float AS targeting_score,
+            a.rank::float AS rank,
+            rp.roof_lon,
+            rp.roof_lat
+        FROM mart.adressen_mit_pv a
+        LEFT JOIN roof_points rp ON rp.gwr_egid = a.gwr_egid
+        ORDER BY a.adresse;
         """
     )
     return pd.read_sql(query, engine)
