@@ -160,8 +160,56 @@ def render_db_error(exc: Exception, db_url: str):
         st.exception(exc)
 
 
-def build_quartier_map(df: pd.DataFrame):
-    map_df = df.dropna(subset=["geojson"]).copy()
+def score_color(score: float, selected: bool = False) -> list[int]:
+    if selected:
+        return [247, 148, 29, 210]
+    return [int(235 - 145 * score), int(245 - 30 * score), int(255 - 140 * score), 155]
+
+
+def selected_view_state(
+    quartier_df: pd.DataFrame,
+    selected_quartier: str | None = None,
+    selected_address: pd.Series | None = None,
+    street_points: pd.DataFrame | None = None,
+) -> pdk.ViewState:
+    if selected_address is not None and pd.notna(selected_address.get("roof_lon")):
+        return pdk.ViewState(
+            latitude=float(selected_address["roof_lat"]),
+            longitude=float(selected_address["roof_lon"]),
+            zoom=16,
+            pitch=0,
+        )
+
+    if street_points is not None and not street_points.empty:
+        point_df = street_points.dropna(subset=["roof_lon", "roof_lat"])
+        if not point_df.empty:
+            return pdk.ViewState(
+                latitude=float(point_df["roof_lat"].mean()),
+                longitude=float(point_df["roof_lon"].mean()),
+                zoom=14,
+                pitch=0,
+            )
+
+    if selected_quartier:
+        row = quartier_df.loc[quartier_df["qname"] == selected_quartier]
+        if not row.empty and pd.notna(row.iloc[0].get("center_lon")):
+            return pdk.ViewState(
+                latitude=float(row.iloc[0]["center_lat"]),
+                longitude=float(row.iloc[0]["center_lon"]),
+                zoom=12.5,
+                pitch=0,
+            )
+
+    return pdk.ViewState(latitude=47.3769, longitude=8.5417, zoom=11, pitch=0)
+
+
+def build_dynamic_map(
+    quartier_df: pd.DataFrame,
+    selected_quartier: str | None = None,
+    selected_address: pd.Series | None = None,
+    street_points: pd.DataFrame | None = None,
+):
+    map_df = quartier_df.dropna(subset=["geojson"]).copy()
     if map_df.empty:
         return None
 
@@ -173,7 +221,7 @@ def build_quartier_map(df: pd.DataFrame):
             continue
 
         score = float(row["targeting_score_dyn"])
-        color = [int(235 - 145 * score), int(245 - 30 * score), int(255 - 140 * score), 160]
+        is_selected = selected_quartier is not None and row["qname"] == selected_quartier
 
         features.append(
             {
@@ -183,7 +231,11 @@ def build_quartier_map(df: pd.DataFrame):
                     "qname": row["qname"],
                     "rank": int(row["rank_dyn"]),
                     "score": round(score, 4),
-                    "color": color,
+                    "label": row["qname"],
+                    "detail": f"Rank {int(row['rank_dyn'])} | Score {score:.3f}",
+                    "color": score_color(score, is_selected),
+                    "line_color": [203, 88, 20, 255] if is_selected else [79, 88, 103, 170],
+                    "line_width": 4 if is_selected else 1,
                 },
             }
         )
@@ -193,24 +245,85 @@ def build_quartier_map(df: pd.DataFrame):
 
     geojson = {"type": "FeatureCollection", "features": features}
 
-    layer = pdk.Layer(
+    layers = [
+        pdk.Layer(
         "GeoJsonLayer",
         data=geojson,
         stroked=True,
         filled=True,
         get_fill_color="properties.color",
-        get_line_color=[90, 98, 110],
+        get_line_color="properties.line_color",
+        get_line_width="properties.line_width",
         line_width_min_pixels=1,
         pickable=True,
         auto_highlight=True,
-    )
+        )
+    ]
 
-    view_state = pdk.ViewState(latitude=47.3769, longitude=8.5417, zoom=11, pitch=0)
+    if street_points is not None and not street_points.empty:
+        point_df = street_points.dropna(subset=["roof_lon", "roof_lat"]).copy()
+        if not point_df.empty:
+            point_df["label"] = point_df["adresse"].fillna(point_df["lokalisationsname"]).fillna("Adresse")
+            point_df["detail"] = (
+                "Stromertrag "
+                + point_df["sum_stromertrag"].fillna(0).map(lambda value: f"{value:,.0f}".replace(",", "'"))
+                + " kWh"
+            )
+            layers.append(
+                pdk.Layer(
+                    "ScatterplotLayer",
+                    data=point_df,
+                    get_position="[roof_lon, roof_lat]",
+                    get_fill_color=[47, 133, 90, 115],
+                    get_line_color=[25, 92, 62, 190],
+                    get_radius=18,
+                    radius_min_pixels=3,
+                    radius_max_pixels=18,
+                    line_width_min_pixels=1,
+                    stroked=True,
+                    filled=True,
+                    pickable=True,
+                )
+            )
+
+    if selected_address is not None and pd.notna(selected_address.get("roof_lon")):
+        selected_point = pd.DataFrame(
+            [
+                {
+                    "adresse": selected_address.get("adresse"),
+                    "label": selected_address.get("adresse"),
+                    "detail": f"Stromertrag {fmt_num(selected_address.get('sum_stromertrag'))} kWh",
+                    "roof_lon": selected_address.get("roof_lon"),
+                    "roof_lat": selected_address.get("roof_lat"),
+                    "sum_stromertrag": selected_address.get("sum_stromertrag"),
+                }
+            ]
+        )
+        layers.append(
+            pdk.Layer(
+                "ScatterplotLayer",
+                data=selected_point,
+                get_position="[roof_lon, roof_lat]",
+                get_fill_color=[219, 68, 55, 230],
+                get_line_color=[120, 32, 24, 255],
+                get_radius=28,
+                radius_min_pixels=8,
+                radius_max_pixels=28,
+                line_width_min_pixels=2,
+                stroked=True,
+                filled=True,
+                pickable=True,
+            )
+        )
+
+    view_state = selected_view_state(quartier_df, selected_quartier, selected_address, street_points)
 
     return pdk.Deck(
-        layers=[layer],
+        layers=layers,
         initial_view_state=view_state,
-        tooltip={"html": "<b>{qname}</b><br/>Rank: {rank}<br/>Score: {score}"},
+        tooltip={
+            "html": "<b>{label}</b><br/>{detail}",
+        },
     )
 
 
@@ -309,13 +422,18 @@ def show_quartier_view(quartier_scored: pd.DataFrame, top_n: int):
 
     st.altair_chart(chart, use_container_width=True)
 
-    deck = build_quartier_map(quartier_scored)
+    deck = build_dynamic_map(quartier_scored, selected_quartier=selected_q)
     if deck is not None:
-        st.markdown("<p class='section-title'>Kartenansicht (dynamischer Quartier-Score)</p>", unsafe_allow_html=True)
+        st.markdown("<p class='section-title'>Kartenansicht des gewählten Quartiers</p>", unsafe_allow_html=True)
         st.pydeck_chart(deck, use_container_width=True)
 
 
-def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
+def show_strassen_view(
+    strassen_df: pd.DataFrame,
+    adressen_df: pd.DataFrame,
+    quartier_scored: pd.DataFrame,
+    top_n: int,
+):
     st.markdown("### Straßen-Analyse")
     st.markdown(
         "<div class='hint-box'>Die Straßenebene hilft bei mikrogeografischer Vertriebsplanung, "
@@ -338,6 +456,7 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         key="strasse_select",
     )
     row = strassen_df.loc[strassen_df["lokalisationsname"] == selected_s].iloc[0]
+    street_points = adressen_df[adressen_df["lokalisationsname"] == selected_s]
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Anzahl Adressen", fmt_num(row["anzahl_adressen"]))
@@ -354,6 +473,17 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
         "Bester Quartier-Rank (dyn)",
         fmt_num(row.get("best_quartier_rank_dyn")) if pd.notna(row.get("best_quartier_rank_dyn")) else "-",
     )
+
+    deck = build_dynamic_map(
+        quartier_scored,
+        selected_quartier=street_points["statistisches_quartier"].dropna().iloc[0]
+        if not street_points["statistisches_quartier"].dropna().empty
+        else None,
+        street_points=street_points,
+    )
+    if deck is not None:
+        st.markdown("<p class='section-title'>Kartenansicht der gewählten Straße</p>", unsafe_allow_html=True)
+        st.pydeck_chart(deck, use_container_width=True)
 
     st.markdown(f"<p class='section-title'>Top-Straßen nach {sort_label}</p>", unsafe_allow_html=True)
     top_df = strassen_df.sort_values(sort_col, ascending=False).head(top_n).copy()
@@ -416,7 +546,7 @@ def show_strassen_view(strassen_df: pd.DataFrame, top_n: int):
     st.altair_chart(chart, use_container_width=True)
 
 
-def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
+def show_adressen_view(adressen_df: pd.DataFrame, quartier_scored: pd.DataFrame, top_n: int):
     st.markdown("### Adress- und Haus-Analyse")
     st.markdown(
         "<div class='hint-box'>Adressen bilden die operative Lead-Ebene für direkte Vertriebskontakte "
@@ -474,6 +604,16 @@ def show_adressen_view(adressen_df: pd.DataFrame, top_n: int):
         "Quartier-Rank (dyn)",
         fmt_num(row.get("rank_dyn")) if pd.notna(row.get("rank_dyn")) else "-",
     )
+
+    deck = build_dynamic_map(
+        quartier_scored,
+        selected_quartier=row.get("statistisches_quartier"),
+        selected_address=row,
+        street_points=filtered_df if selected_street != "Alle" else None,
+    )
+    if deck is not None:
+        st.markdown("<p class='section-title'>Kartenansicht der gewählten Adresse</p>", unsafe_allow_html=True)
+        st.pydeck_chart(deck, use_container_width=True)
 
     st.markdown("<p class='section-title'>Top-Adressen nach Stromertrag</p>", unsafe_allow_html=True)
     top_df = filtered_df.sort_values("sum_stromertrag", ascending=False).head(top_n).copy()
@@ -623,9 +763,9 @@ def main():
     if mode == "Quartier":
         show_quartier_view(quartier_scored, top_n)
     elif mode == "Straße":
-        show_strassen_view(strassen_ctx, top_n)
+        show_strassen_view(strassen_ctx, adressen_ctx, quartier_scored, top_n)
     else:
-        show_adressen_view(adressen_ctx, top_n)
+        show_adressen_view(adressen_ctx, quartier_scored, top_n)
 
 
 if __name__ == "__main__":
